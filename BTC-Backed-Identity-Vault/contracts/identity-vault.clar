@@ -118,3 +118,54 @@
       (asserts! (not (get revoked credential)) err-credential-revoked)
       (ok (map-set user-credentials credential-key 
         (merge credential {revoked: true}))))))
+
+(define-public (verify-credential 
+  (user principal)
+  (credential-id (string-ascii 64)))
+  (let ((credential-key {user: user, credential-id: credential-id}))
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (let ((credential (unwrap! (map-get? user-credentials credential-key) err-not-found)))
+      (asserts! (not (get revoked credential)) err-credential-revoked)
+      (asserts! (< block-height (get expires-at credential)) err-expired)
+      (map-set user-credentials credential-key 
+        (merge credential {verified: true}))
+      (let ((profile (unwrap! (map-get? user-profile user) err-not-found)))
+        (ok (map-set user-profile user 
+          (merge profile {
+            verified-credentials: (+ (get verified-credentials profile) u1),
+            reputation-score: (min (+ (get reputation-score profile) u5) u1000)
+          })))))))
+
+(define-public (endorse-credential 
+  (user principal)
+  (credential-id (string-ascii 64)))
+  (let ((endorser tx-sender)
+        (credential-key {user: user, credential-id: credential-id}))
+    (let ((endorser-profile (unwrap! (map-get? user-profile endorser) err-not-found))
+          (credential (unwrap! (map-get? user-credentials credential-key) err-not-found)))
+      (asserts! (>= (get reputation-score endorser-profile) reputation-threshold) err-invalid-endorser)
+      (asserts! (not (get revoked credential)) err-credential-revoked)
+      (asserts! (< block-height (get expires-at credential)) err-expired)
+      (try! (stx-transfer? endorsement-cost endorser (as-contract tx-sender)))
+      (map-set user-credentials credential-key 
+        (merge credential {endorsement-count: (+ (get endorsement-count credential) u1)}))
+      (let ((target-profile (unwrap! (map-get? user-profile user) err-not-found)))
+        (ok (map-set user-profile user 
+          (merge target-profile {
+            reputation-score: (min (+ (get reputation-score target-profile) u3) u1000)
+          })))))))
+
+(define-public (batch-verify-credentials 
+  (credentials (list 10 {user: principal, credential-id: (string-ascii 64)})))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (ok (fold verify-single-credential credentials (ok u0)))))
+
+(define-private (verify-single-credential 
+  (cred-data {user: principal, credential-id: (string-ascii 64)})
+  (prev-result (response uint uint)))
+  (match prev-result
+    ok-value (match (verify-credential (get user cred-data) (get credential-id cred-data))
+                success (ok (+ ok-value u1))
+                error (err error))
+    err-value (err err-value)))
