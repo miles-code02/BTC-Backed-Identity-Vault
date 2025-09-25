@@ -169,3 +169,66 @@
                 success (ok (+ ok-value u1))
                 error (err error))
     err-value (err err-value)))
+
+(define-public (increase-stake 
+  (user principal)
+  (credential-id (string-ascii 64))
+  (additional-stake uint))
+  (let ((caller tx-sender)
+        (credential-key {user: user, credential-id: credential-id}))
+    (asserts! (is-eq caller user) err-unauthorized)
+    (asserts! (> additional-stake u0) err-invalid-amount)
+    (let ((credential (unwrap! (map-get? user-credentials credential-key) err-not-found)))
+      (asserts! (not (get revoked credential)) err-credential-revoked)
+      (try! (stx-transfer? additional-stake caller (as-contract tx-sender)))
+      (map-set user-credentials credential-key 
+        (merge credential {stake-amount: (+ (get stake-amount credential) additional-stake)}))
+      (let ((profile (unwrap! (map-get? user-profile caller) err-not-found)))
+        (ok (map-set user-profile caller 
+          (merge profile {total-stake: (+ (get total-stake profile) additional-stake)})))))))
+
+(define-public (withdraw-expired-stake 
+  (user principal)
+  (credential-id (string-ascii 64)))
+  (let ((caller tx-sender)
+        (credential-key {user: user, credential-id: credential-id}))
+    (asserts! (is-eq caller user) err-unauthorized)
+    (let ((credential (unwrap! (map-get? user-credentials credential-key) err-not-found)))
+      (asserts! (>= block-height (+ (get expires-at credential) cooling-period)) err-cooling-period)
+      (let ((stake-amount (get stake-amount credential)))
+        (try! (as-contract (stx-transfer? stake-amount tx-sender caller)))
+        (map-delete user-credentials credential-key)
+        (let ((profile (unwrap! (map-get? user-profile caller) err-not-found)))
+          (ok (map-set user-profile caller 
+            (merge profile {
+              total-credentials: (- (get total-credentials profile) u1),
+              total-stake: (- (get total-stake profile) stake-amount)
+            }))))))))
+
+(define-public (slash-stake 
+  (user principal)
+  (credential-id (string-ascii 64))
+  (slash-percentage uint))
+  (let ((credential-key {user: user, credential-id: credential-id}))
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (<= slash-percentage u100) err-invalid-amount)
+    (let ((credential (unwrap! (map-get? user-credentials credential-key) err-not-found)))
+      (let ((slash-amount (/ (* (get stake-amount credential) slash-percentage) u100)))
+        (map-set user-credentials credential-key 
+          (merge credential {
+            stake-amount: (- (get stake-amount credential) slash-amount),
+            revoked: true
+          }))
+        (let ((profile (unwrap! (map-get? user-profile user) err-not-found)))
+          (ok (map-set user-profile user 
+            (merge profile {
+              total-stake: (- (get total-stake profile) slash-amount),
+              reputation-score: (max (- (get reputation-score profile) u20) u0)
+            }))))))))
+
+(define-public (emergency-withdraw)
+  (let ((caller tx-sender))
+    (asserts! (is-eq caller contract-owner) err-owner-only)
+    (let ((contract-balance (stx-get-balance (as-contract tx-sender))))
+      (try! (as-contract (stx-transfer? contract-balance tx-sender caller)))
+      (ok contract-balance))))
