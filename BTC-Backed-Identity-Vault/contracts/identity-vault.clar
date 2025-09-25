@@ -69,17 +69,17 @@
     (ok (map-set user-profile caller {
       total-credentials: u0,
       reputation-score: u100,
-      created-at: block-height,
+      created-at: stacks-block-height,
       total-stake: initial-stake,
       verified-credentials: u0,
-      last-activity: block-height
+      last-activity: stacks-block-height
     }))))
 
 (define-public (update-profile-activity)
   (let ((caller tx-sender))
     (let ((profile (unwrap! (map-get? user-profile caller) err-not-found)))
       (ok (map-set user-profile caller 
-        (merge profile {last-activity: block-height}))))))
+        (merge profile {last-activity: stacks-block-height}))))))
 
 (define-public (add-credential 
   (credential-id (string-ascii 64))
@@ -100,7 +100,7 @@
         {
           credential-hash: credential-hash,
           issuer: issuer,
-          issued-at: block-height,
+          issued-at: stacks-block-height,
           expires-at: expires-at,
           verified: false,
           revoked: false,
@@ -112,7 +112,7 @@
           (merge profile {
             total-credentials: (+ (get total-credentials profile) u1),
             total-stake: (+ (get total-stake profile) stake-amount),
-            last-activity: block-height
+            last-activity: stacks-block-height
           })))))))
 
 (define-public (revoke-credential 
@@ -134,7 +134,7 @@
     (asserts! (is-eq tx-sender contract-owner) err-owner-only)
     (let ((credential (unwrap! (map-get? user-credentials credential-key) err-not-found)))
       (asserts! (not (get revoked credential)) err-credential-revoked)
-      (asserts! (< block-height (get expires-at credential)) err-expired)
+      (asserts! (< stacks-block-height (get expires-at credential)) err-expired)
       (map-set user-credentials credential-key 
         (merge credential {verified: true}))
       (let ((profile (unwrap! (map-get? user-profile user) err-not-found)))
@@ -153,7 +153,7 @@
           (credential (unwrap! (map-get? user-credentials credential-key) err-not-found)))
       (asserts! (>= (get reputation-score endorser-profile) reputation-threshold) err-invalid-endorser)
       (asserts! (not (get revoked credential)) err-credential-revoked)
-      (asserts! (< block-height (get expires-at credential)) err-expired)
+      (asserts! (< stacks-block-height (get expires-at credential)) err-expired)
       (try! (stx-transfer? endorsement-cost endorser (as-contract tx-sender)))
       (map-set user-credentials credential-key 
         (merge credential {endorsement-count: (+ (get endorsement-count credential) u1)}))
@@ -202,7 +202,7 @@
         (credential-key {user: user, credential-id: credential-id}))
     (asserts! (is-eq caller user) err-unauthorized)
     (let ((credential (unwrap! (map-get? user-credentials credential-key) err-not-found)))
-      (asserts! (>= block-height (+ (get expires-at credential) cooling-period)) err-cooling-period)
+      (asserts! (>= stacks-block-height (+ (get expires-at credential) cooling-period)) err-cooling-period)
       (let ((stake-amount (get stake-amount credential)))
         (try! (as-contract (stx-transfer? stake-amount tx-sender caller)))
         (map-delete user-credentials credential-key)
@@ -282,7 +282,7 @@
   (match (map-get? user-credentials {user: user, credential-id: credential-id})
     credential (and 
                  (not (get revoked credential))
-                 (< block-height (get expires-at credential))
+                 (< stacks-block-height (get expires-at credential))
                  (get verified credential))
     false))
 
