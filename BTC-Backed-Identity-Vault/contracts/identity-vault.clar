@@ -232,3 +232,75 @@
     (let ((contract-balance (stx-get-balance (as-contract tx-sender))))
       (try! (as-contract (stx-transfer? contract-balance tx-sender caller)))
       (ok contract-balance))))
+
+(define-public (create-credential-type 
+  (type-id (string-ascii 32))
+  (type-name (string-ascii 64))
+  (required-stake uint)
+  (verification-required bool))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (is-none (map-get? credential-types type-id)) err-already-exists)
+    (ok (map-set credential-types type-id {
+      type-name: type-name,
+      required-stake: required-stake,
+      verification-required: verification-required,
+      created-by: tx-sender,
+      active: true
+    }))))
+
+(define-public (toggle-credential-type 
+  (type-id (string-ascii 32)))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (let ((cred-type (unwrap! (map-get? credential-types type-id) err-not-found)))
+      (ok (map-set credential-types type-id 
+        (merge cred-type {active: (not (get active cred-type))}))))))
+
+(define-read-only (get-credential 
+  (user principal)
+  (credential-id (string-ascii 64)))
+  (map-get? user-credentials {user: user, credential-id: credential-id}))
+
+(define-read-only (get-user-profile (user principal))
+  (map-get? user-profile user))
+
+(define-read-only (get-credential-type (type-id (string-ascii 32)))
+  (map-get? credential-types type-id))
+
+(define-read-only (is-credential-valid 
+  (user principal)
+  (credential-id (string-ascii 64)))
+  (match (map-get? user-credentials {user: user, credential-id: credential-id})
+    credential (and 
+                 (not (get revoked credential))
+                 (< block-height (get expires-at credential))
+                 (get verified credential))
+    false))
+
+(define-read-only (get-user-reputation (user principal))
+  (match (map-get? user-profile user)
+    profile (get reputation-score profile)
+    u0))
+
+(define-read-only (calculate-trust-score 
+  (user principal)
+  (credential-id (string-ascii 64)))
+  (match (get-credential user credential-id)
+    credential (let ((base-score (if (get verified credential) u50 u20))
+                     (endorsement-score (* (get endorsement-count credential) u5))
+                     (stake-score (min (/ (get stake-amount credential) u100000) u20)))
+                 (+ base-score endorsement-score stake-score))
+    u0))
+
+(define-read-only (get-contract-stats)
+  (ok {
+    owner: contract-owner,
+    min-stake: min-stake-amount,
+    reputation-threshold: reputation-threshold,
+    endorsement-cost: endorsement-cost,
+    cooling-period: cooling-period
+  }))
+
+(define-read-only (get-contract-balance)
+  (stx-get-balance (as-contract tx-sender)))
