@@ -1,5 +1,6 @@
 ;; BTC-Backed Identity Vault
 ;; A comprehensive decentralized identity manager for verifiable credentials
+
 (define-constant contract-owner tx-sender)
 (define-constant err-owner-only (err u100))
 (define-constant err-not-found (err u101))
@@ -17,6 +18,13 @@
 (define-constant reputation-threshold u80)
 (define-constant endorsement-cost u100000) ;; 0.001 BTC in sats
 (define-constant cooling-period u144) ;; ~24 hours in blocks
+
+;; Helper functions for min/max operations
+(define-private (min-uint (a uint) (b uint))
+  (if (<= a b) a b))
+
+(define-private (max-uint (a uint) (b uint))
+  (if (>= a b) a b))
 
 ;; Core data maps
 (define-map user-credentials 
@@ -133,7 +141,7 @@
         (ok (map-set user-profile user 
           (merge profile {
             verified-credentials: (+ (get verified-credentials profile) u1),
-            reputation-score: (min (+ (get reputation-score profile) u5) u1000)
+            reputation-score: (min-uint (+ (get reputation-score profile) u5) u1000)
           })))))))
 
 (define-public (endorse-credential 
@@ -152,7 +160,7 @@
       (let ((target-profile (unwrap! (map-get? user-profile user) err-not-found)))
         (ok (map-set user-profile user 
           (merge target-profile {
-            reputation-score: (min (+ (get reputation-score target-profile) u3) u1000)
+            reputation-score: (min-uint (+ (get reputation-score target-profile) u3) u1000)
           })))))))
 
 (define-public (batch-verify-credentials 
@@ -223,7 +231,7 @@
           (ok (map-set user-profile user 
             (merge profile {
               total-stake: (- (get total-stake profile) slash-amount),
-              reputation-score: (max (- (get reputation-score profile) u20) u0)
+              reputation-score: (max-uint (- (get reputation-score profile) u20) u0)
             }))))))))
 
 (define-public (emergency-withdraw)
@@ -289,7 +297,7 @@
   (match (get-credential user credential-id)
     credential (let ((base-score (if (get verified credential) u50 u20))
                      (endorsement-score (* (get endorsement-count credential) u5))
-                     (stake-score (min (/ (get stake-amount credential) u100000) u20)))
+                     (stake-score (min-uint (/ (get stake-amount credential) u100000) u20)))
                  (+ base-score endorsement-score stake-score))
     u0))
 
